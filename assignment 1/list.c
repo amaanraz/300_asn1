@@ -95,7 +95,7 @@ void* List_next(List* pList){
     // check what next item is
     if(pList->current->next == NULL){
         // set current to beyond the end of the list 
-        pList->current = LIST_OOB_END;
+        pList->current = (Node*)LIST_OOB_END;
         return NULL;
     }
 
@@ -114,7 +114,7 @@ void* List_prev(List* pList){
     if(pList->current->prev == NULL){
         // out of scope
         // set to before the start of pList
-        pList->current = LIST_OOB_START;
+        pList->current = (Node*)LIST_OOB_START;
         return NULL;
     }
 
@@ -170,7 +170,7 @@ int List_insert_after(List* pList, void* pItem){
         pList->count++;
         // success
         return 0;        
-    } else if(pList->current == LIST_OOB_END){ // current is beyond list add at end
+    } else if(pList->current == (Node*)LIST_OOB_END){ // current is beyond list add at end
 
         Node* newNode = freeNodeList;
         // check if node was already statically allocated
@@ -247,6 +247,7 @@ int List_insert_after(List* pList, void* pItem){
         return 0;
     }
 
+    return 0;
 }
 
 // Adds item to pList directly before the current item, and makes the new item the current one. 
@@ -282,7 +283,7 @@ int List_insert_before(List* pList, void* pItem){
         pList->count++;
         // success
         return 0;        
-    } else if(pList->current == LIST_OOB_END){ // current is beyond list add at end
+    } else if(pList->current == (Node*)LIST_OOB_END){ // current is beyond list add at end
 
         Node* newNode = freeNodeList;
         // check if node was already statically allocated
@@ -361,6 +362,8 @@ int List_insert_before(List* pList, void* pItem){
         // success
         return 0;
     }
+
+    return 0;
 }
 
 // Adds item to the end of pList, and makes the new item the current one. 
@@ -408,7 +411,7 @@ int List_prepend(List* pList, void* pItem){
     newNode->item = pItem;
     newNode->next = pList->head;
     newNode->prev = NULL;
-
+    
     if (pList->head != NULL) {
         pList->head->prev = newNode;
     } else {
@@ -429,15 +432,30 @@ int List_prepend(List* pList, void* pItem){
 void* List_remove(List* pList){
     assert(pList != NULL);
 
-    if (pList->current == LIST_OOB_START || pList->current == LIST_OOB_END || pList->current == NULL){
+    if (pList->current == (Node*)LIST_OOB_START || pList->current == (Node*)LIST_OOB_END || pList->current == NULL){
         return NULL;
     }
 
     Node* current = pList->current;
     void* currentItem = current->item;
 
-    if(pList->current == pList->tail || pList->head == pList->tail){
-        return List_trim(pList);
+    if(pList->head == pList->tail){
+        // only one thing in list
+        pList->head = NULL;
+        pList->tail = NULL;
+        pList->current = NULL;
+
+        // de init node 
+        current->used = false;
+        current->item = NULL;
+        current->next = freeNodeList;
+        current->prev = NULL;
+        freeNodeList = current;
+
+        
+        pList->count--;
+
+        return currentItem;
     }
     
     // Normal condition
@@ -483,7 +501,7 @@ void* List_remove(List* pList){
 // Return last item and take it out of pList. Make the new last item the current one.
 // Return NULL if pList is initially empty.
 void* List_trim(List* pList){
-    if (pList == NULL || pList->tail == NULL) {
+    if (pList == NULL || pList->tail == NULL || pList->current == NULL) {
         return NULL; 
     }
 
@@ -494,10 +512,15 @@ void* List_trim(List* pList){
         pList->tail->prev->next = NULL;
         pList->tail = pList->tail->prev;
         pList->current = pList->tail;
+
     } else {
         pList->head = NULL;
+        pList->head->next = NULL;
+        pList->head->prev = NULL;
         pList->tail = NULL;
-        pList->current = NULL;
+        pList->tail->prev = NULL;
+        pList->tail->next = NULL;
+        pList->current = pList->head;
     }
 
     // de init node 
@@ -549,8 +572,8 @@ void List_concat(List* pList1, List* pList2){
 
     // delete pList2 content
     if (pList2->head != NULL) {
-        pList2->head->next = freeHeadList;
-        freeHeadList = pList2->head;
+        pList2->next = freeHeadList;
+        freeHeadList = pList2;
     }
     pList2->head = NULL;
     pList2->tail = NULL;
@@ -568,48 +591,21 @@ typedef void (*FREE_FN)(void* pItem);
 void List_free(List* pList, FREE_FN pItemFreeFn){
     assert(pList != NULL);
 
-     if (pList == NULL) {
-        return; // Handle invalid list.
-    }
-
-    // Free all nodes in the list.
+    // Start from the head of the list
     Node* currentNode = pList->head;
     while (currentNode != NULL) {
+        (*pItemFreeFn)(currentNode->item);
+
         Node* nextNode = currentNode->next;
+        currentNode->next = freeNodeList;
+        freeNodeList = currentNode;
 
-        // Call the item freeing function if provided.
-        if (pItemFreeFn != NULL && currentNode->item != NULL) {
-            (*pItemFreeFn)(currentNode->item);
-        }
-
-        if(currentNode = pList->head){
-            currentNode->next = freeHeadList;
-            currentNode->item = NULL;
-            freeHeadList = currentNode;
-
-            currentNode = nextNode;
-        } else {
-            // Reset the node and return it to the free node list.
-            currentNode->next = freeNodeList;
-            currentNode->item = NULL;
-            freeNodeList = currentNode;
-
-            currentNode = nextNode;
-        }
+        // Move to the next node
+        currentNode = nextNode;
     }
 
-    // Reset the list properties.
-    pList->head = NULL;
-    pList->tail = NULL;
-    pList->current = NULL;
-    pList->count = 0;
-    pList->used = false;
-
-    // Return the list head to the free head list.
-    if (pList != freeHeadList) {
-        pList->next = freeHeadList;
-        freeHeadList = pList;
-    }
+    pList->next = freeHeadList;
+    freeHeadList = pList;
 }
 
 
@@ -668,6 +664,6 @@ void* List_search(List* pList, COMPARATOR_FN pComparator, void* pComparisonArg){
     }
 
     // No match found, set current pointer beyond the end of the list and return NULL.
-    pList->current = LIST_OOB_END;
+    pList->current = (Node*)LIST_OOB_END;
     return NULL;
 }
